@@ -92,37 +92,59 @@ def cmd_chat(args: argparse.Namespace) -> int:
     return 0
 
 
-def _interactive_config() -> int:
-    print_header("mika configuration")
+def _select_provider_interactive() -> str:
+    """Page 1: let the user pick a provider."""
+    print_header("Page 1 / 2: Select provider")
     providers = list_providers()
     choices = [f"{cls.CONFIG.display_name}" for cls in providers.values()]
     selected = prompt_choice("Select a provider:", choices)
     provider_name = list(providers.keys())[selected]
     provider_cls = providers[provider_name]
+    print_success(f"Selected provider: {provider_cls.CONFIG.display_name}")
+    return provider_name
 
-    print_info(f"\nSelected: {provider_cls.CONFIG.display_name}")
 
-    # API key
-    if provider_cls.CONFIG.requires_api_key:
-        existing = get_api_key(provider_name)
-        if existing:
-            print_success(f"API key already configured for {provider_cls.CONFIG.display_name}.")
-            if not confirm("Change it?"):
-                api_key = existing
-            else:
-                api_key = prompt_input(f"Enter {provider_cls.CONFIG.display_name} API key", password=True)
-        else:
-            api_key = prompt_input(f"Enter {provider_cls.CONFIG.display_name} API key", password=True)
-        if api_key:
-            set_api_key(provider_name, api_key)
+def _enter_api_key_interactive(provider_name: str) -> bool:
+    """Page 2: ask for the API key (only if required) and save it."""
+    from mika.providers import get_provider
 
-    # Model
+    provider_cls = get_provider(provider_name)
+    print_header("Page 2 / 2: API key")
+
+    if not provider_cls.CONFIG.requires_api_key:
+        print_info(f"{provider_cls.CONFIG.display_name} does not require an API key.")
+        return True
+
+    existing = get_api_key(provider_name)
+    if existing:
+        print_success("API key already configured.")
+        if not confirm("Change it?"):
+            return True
+
+    api_key = prompt_input(
+        f"Enter your {provider_cls.CONFIG.display_name} API key",
+        password=True,
+    )
+    if not api_key:
+        print_error("API key is required.")
+        return False
+    set_api_key(provider_name, api_key)
+    print_success("API key saved.")
+    return True
+
+
+def _interactive_config() -> int:
+    """Full interactive config (provider, API key, model, system prompt)."""
+    provider_name = _select_provider_interactive()
+    if not _enter_api_key_interactive(provider_name):
+        return 1
+
+    provider_cls = get_provider(provider_name)
     models = provider_cls.get_models()
     default_idx = models.index(provider_cls.get_default_model()) if provider_cls.get_default_model() in models else 0
     model_choice = prompt_choice("Select default model:", models, default=default_idx)
     model = models[model_choice]
 
-    # System prompt
     current_prompt = load_config().get("system_prompt", "")
     system_prompt = prompt_input("System prompt", default=current_prompt)
 
@@ -133,6 +155,32 @@ def _interactive_config() -> int:
     print_info(f"Provider: {provider_name}")
     print_info(f"Model:    {model}")
     return 0
+
+
+def _needs_setup() -> bool:
+    """Return True if provider or required API key is missing."""
+    provider_name = get_active_provider()
+    if not provider_name:
+        return True
+    provider_cls = get_provider(provider_name)
+    if provider_cls.CONFIG.requires_api_key and not get_api_key(provider_name):
+        return True
+    return False
+
+
+def run_first_time_setup() -> bool:
+    """Run the two-page first-time setup wizard and return True on success."""
+    print_header("Welcome to mika!")
+    print_info("It looks like this is your first time. Let's set things up.\n")
+
+    provider_name = _select_provider_interactive()
+    if not _enter_api_key_interactive(provider_name):
+        return False
+
+    provider_cls = get_provider(provider_name)
+    set_provider(provider_name, model=provider_cls.get_default_model())
+    print_success("\nSetup complete! Starting chat...")
+    return True
 
 
 def cmd_config(args: argparse.Namespace) -> int:
@@ -243,6 +291,12 @@ def main(argv: Optional[list] = None) -> int:
             args.session = None
         if not hasattr(args, "new"):
             args.new = False
+
+        # First-time setup wizard: provider → API key → chat.
+        if _needs_setup():
+            if not run_first_time_setup():
+                print_error("Setup incomplete. Run 'mika config -i' to try again.")
+                return 1
         return cmd_chat(args)
     if args.command == "config":
         return cmd_config(args)
