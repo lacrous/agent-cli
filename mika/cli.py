@@ -234,6 +234,15 @@ def main(argv: Optional[list] = None) -> int:
     logger.debug("Starting mika CLI with args: %s", args)
 
     if args.command == "chat" or args.command is None:
+        # Ensure chat-related attributes exist when no subcommand is given.
+        if not hasattr(args, "provider"):
+            args.provider = None
+        if not hasattr(args, "model"):
+            args.model = None
+        if not hasattr(args, "session"):
+            args.session = None
+        if not hasattr(args, "new"):
+            args.new = False
         return cmd_chat(args)
     if args.command == "config":
         return cmd_config(args)

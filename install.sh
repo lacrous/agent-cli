@@ -82,9 +82,19 @@ setup_virtualenv() {
     local venv_dir="${HOME}/.local/share/mika/venv"
     log_info "Setting up virtual environment at ${venv_dir}..."
     mkdir -p "$(dirname "$venv_dir")"
+    local recreate=false
     if [ -d "$venv_dir" ]; then
-        log_warn "Existing virtual environment found. Reusing."
-    else
+        if [ ! -x "$venv_dir/bin/python" ]; then
+            log_warn "Existing virtual environment is missing python binary. Recreating."
+            recreate=true
+        else
+            log_warn "Existing virtual environment found. Reusing."
+        fi
+    fi
+    if [ "$recreate" = true ]; then
+        rm -rf "$venv_dir"
+        python3 -m venv "$venv_dir"
+    elif [ ! -d "$venv_dir" ]; then
         python3 -m venv "$venv_dir"
     fi
     echo "$venv_dir"
